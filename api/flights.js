@@ -164,17 +164,18 @@ module.exports = async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.status(200).json({
       success: true,
-      range: {
-        begin: start,
-        end
-      },
+      range: { begin: start, end },
       flights
     });
   } catch (error) {
+    console.error('API /api/flights failed:', error);
+
     res.setHeader('Content-Type', 'application/json');
     res.status(500).json({
       success: false,
-      error: error.message || 'Unknown error'
+      error: error?.message || 'Unknown error',
+      cause: error?.cause?.message || null,
+      stack: process.env.NODE_ENV !== 'production' ? error?.stack : undefined
     });
   }
 };
