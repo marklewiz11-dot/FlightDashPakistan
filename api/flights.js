@@ -1,196 +1,193 @@
 const AIRPORTS = [
-  { code: 'OPIS', city: 'Islamabad', iata: 'ISB' },
-  { code: 'OPLA', city: 'Lahore', iata: 'LHE' },
-  { code: 'OPKC', city: 'Karachi', iata: 'KHI' }
+  { city: 'Islamabad', iata: 'ISB', icao: 'OPIS', lat: 33.549, lon: 72.826, radiusKm: 80 },
+  { city: 'Lahore', iata: 'LHE', icao: 'OPLA', lat: 31.5216, lon: 74.4036, radiusKm: 80 },
+  { city: 'Karachi', iata: 'KHI', icao: 'OPKC', lat: 24.9065, lon: 67.1608, radiusKm: 80 }
 ];
+
+// Rough Pakistan bounding box
+const PAKISTAN_BBOX = {
+  lamin: 23.5,
+  lamax: 37.2,
+  lomin: 60.8,
+  lomax: 77.9
+};
+
+function toRad(deg) {
+  return (deg * Math.PI) / 180;
+}
+
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
 
 function formatTime(unixSeconds) {
   if (!unixSeconds) return '';
   return new Date(unixSeconds * 1000).toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 }
 
-function normalizeFlight(flight, airportIcao, direction) {
-  const airport = AIRPORTS.find(a => a.code === airportIcao);
-
-  return {
-    airport: airport?.city || airportIcao,
-    airportIata: airport?.iata || airportIcao,
-    airportIcao,
-    direction,
-    callsign: (flight.callsign || '').trim(),
-    icao24: flight.icao24 || '',
-    origin: flight.estDepartureAirport || '',
-    destination: flight.estArrivalAirport || '',
-    firstSeen: flight.firstSeen || null,
-    lastSeen: flight.lastSeen || null,
-    firstSeenText: formatTime(flight.firstSeen),
-    lastSeenText: formatTime(flight.lastSeen),
-    scheduledLikeTime:
-      direction === 'Departure'
-        ? (flight.firstSeen ? new Date(flight.firstSeen * 1000).toISOString() : null)
-        : (flight.lastSeen ? new Date(flight.lastSeen * 1000).toISOString() : null),
-    route:
-      direction === 'Arrival'
-        ? `${flight.estDepartureAirport || 'Unknown'} → ${airportIcao}`
-        : `${airportIcao} → ${flight.estArrivalAirport || 'Unknown'}`
-  };
+function headingToDirection(track) {
+  if (track == null) return 'Unknown';
+  if (track >= 315 || track < 45) return 'Northbound';
+  if (track >= 45 && track < 135) return 'Eastbound';
+  if (track >= 135 && track < 225) return 'Southbound';
+  return 'Westbound';
 }
 
-function getPreviousUtcDayRange() {
-  const now = new Date();
+function classifyAirport(lat, lon) {
+  let best = null;
 
-  const endDate = new Date(Date.UTC(
-    now.getUTCFullYear(),
-    now.getUTCMonth(),
-    now.getUTCDate(),
-    0, 0, 0
-  ));
-
-  const startDate = new Date(endDate.getTime() - 24 * 60 * 60 * 1000);
-
-  return {
-    start: Math.floor(startDate.getTime() / 1000),
-    end: Math.floor(endDate.getTime() / 1000)
-  };
-}
-
-async function getToken() {
-  const clientId = process.env.OPENSKY_CLIENT_ID;
-  const clientSecret = process.env.OPENSKY_CLIENT_SECRET;
-
-  if (!clientId || !clientSecret) {
-    throw new Error('Missing OpenSky credentials. Set OPENSKY_CLIENT_ID and OPENSKY_CLIENT_SECRET in Vercel.');
-  }
-
-  const body = new URLSearchParams({
-    grant_type: 'client_credentials',
-    client_id: clientId,
-    client_secret: clientSecret
-  });
-
-  const res = await fetch(
-    'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body
+  for (const airport of AIRPORTS) {
+    const d = distanceKm(lat, lon, airport.lat, airport.lon);
+    if (d <= airport.radiusKm) {
+      if (!best || d < best.distanceKm) {
+        best = { airport, distanceKm: d };
+      }
     }
-  );
-
-  const text = await res.text();
-
-  if (!res.ok) {
-    throw new Error(`OpenSky token request failed: ${res.status} ${text}`);
   }
 
-  let json;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new Error(`OpenSky token response was not valid JSON: ${text}`);
-  }
-
-  if (!json.access_token) {
-    throw new Error(`OpenSky token response did not contain access_token: ${text}`);
-  }
-
-  return json.access_token;
-}
-
-async function fetchJsonOrEmpty(url, token) {
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`
-    }
-  });
-
-  if (res.status === 404) {
-    return [];
-  }
-
-  const text = await res.text();
-
-  if (!res.ok) {
-    throw new Error(`OpenSky request failed: ${res.status} ${text}`);
-  }
-
-  if (!text.trim()) {
-    return [];
-  }
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`OpenSky response was not valid JSON: ${text}`);
-  }
-}
-
-async function fetchAirportFlights(token, airportIcao, begin, end) {
-  const base = 'https://opensky-network.org/api';
-
-  const arrivals = await fetchJsonOrEmpty(
-    `${base}/flights/arrival?airport=${airportIcao}&begin=${begin}&end=${end}`,
-    token
-  );
-
-  const departures = await fetchJsonOrEmpty(
-    `${base}/flights/departure?airport=${airportIcao}&begin=${begin}&end=${end}`,
-    token
-  );
-
-  return {
-    arrivals: arrivals.map(f => normalizeFlight(f, airportIcao, 'Arrival')),
-    departures: departures.map(f => normalizeFlight(f, airportIcao, 'Departure'))
-  };
+  return best;
 }
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=3600');
+  res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=300');
+  res.setHeader('Content-Type', 'application/json');
 
   try {
-    const { start, end } = getPreviousUtcDayRange();
-    const token = await getToken();
+    const url =
+      `https://opensky-network.org/api/states/all` +
+      `?lamin=${PAKISTAN_BBOX.lamin}` +
+      `&lamax=${PAKISTAN_BBOX.lamax}` +
+      `&lomin=${PAKISTAN_BBOX.lomin}` +
+      `&lomax=${PAKISTAN_BBOX.lomax}`;
 
-    const airportResults = await Promise.all(
-      AIRPORTS.map(async airport => {
-        const data = await fetchAirportFlights(token, airport.code, start, end);
-        return {
-          airport,
-          arrivals: data.arrivals,
-          departures: data.departures
-        };
-      })
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'pakistan-flight-dashboard/1.0'
+      }
+    });
+
+    const text = await response.text();
+
+    if (!response.ok) {
+      return res.status(response.status).json({
+        success: false,
+        error: `OpenSky states request failed: ${response.status}`,
+        details: text
+      });
+    }
+
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return res.status(500).json({
+        success: false,
+        error: 'OpenSky returned non-JSON data',
+        details: text
+      });
+    }
+
+    const states = Array.isArray(data.states) ? data.states : [];
+
+    const flights = [];
+    const summaryMap = new Map(
+      AIRPORTS.map(a => [
+        a.iata,
+        {
+          city: a.city,
+          iata: a.iata,
+          icao: a.icao,
+          total: 0,
+          airborne: 0,
+          onGround: 0
+        }
+      ])
     );
 
-    const summary = airportResults.map(r => ({
-      city: r.airport.city,
-      iata: r.airport.iata,
-      icao: r.airport.code,
-      arrivals: r.arrivals.length,
-      departures: r.departures.length,
-      total: r.arrivals.length + r.departures.length
-    }));
+    for (const s of states) {
+      const [
+        icao24,
+        callsign,
+        origin_country,
+        time_position,
+        last_contact,
+        longitude,
+        latitude,
+        baro_altitude,
+        on_ground,
+        velocity,
+        true_track,
+        vertical_rate,
+        sensors,
+        geo_altitude,
+        squawk,
+        spi,
+        position_source,
+        category
+      ] = s;
 
-    const flights = airportResults
-      .flatMap(r => [...r.arrivals, ...r.departures])
-      .sort((a, b) => new Date(b.scheduledLikeTime || 0) - new Date(a.scheduledLikeTime || 0));
+      if (latitude == null || longitude == null) continue;
 
-    res.status(200).json({
+      const hit = classifyAirport(latitude, longitude);
+      if (!hit) continue;
+
+      const airport = hit.airport;
+      const summary = summaryMap.get(airport.iata);
+      summary.total += 1;
+      if (on_ground) summary.onGround += 1;
+      else summary.airborne += 1;
+
+      flights.push({
+        airport: airport.city,
+        airportIata: airport.iata,
+        airportIcao: airport.icao,
+        callsign: (callsign || '').trim(),
+        icao24: icao24 || '',
+        originCountry: origin_country || '',
+        latitude,
+        longitude,
+        altitudeM: geo_altitude ?? baro_altitude ?? null,
+        onGround: !!on_ground,
+        velocityMs: velocity ?? null,
+        heading: true_track ?? null,
+        directionLabel: headingToDirection(true_track),
+        lastContact: last_contact ?? null,
+        lastContactText: formatTime(last_contact),
+        distanceFromAirportKm: Math.round(hit.distanceKm * 10) / 10
+      });
+    }
+
+    flights.sort((a, b) => {
+      if (a.onGround !== b.onGround) return a.onGround ? 1 : -1;
+      return a.distanceFromAirportKm - b.distanceFromAirportKm;
+    });
+
+    const summary = Array.from(summaryMap.values());
+
+    return res.status(200).json({
       success: true,
       generatedAt: new Date().toISOString(),
-      window: { begin: start, end },
+      openskyTime: data.time || null,
       summary,
       flights
     });
   } catch (error) {
-    console.error('API /api/flights failed:', error);
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      error: error?.message || 'Unknown error',
+      error: error?.message || 'fetch failed',
       cause: error?.cause?.message || null
     });
   }
