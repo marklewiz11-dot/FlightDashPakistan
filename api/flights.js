@@ -1,7 +1,7 @@
 const AIRPORTS = [
-  { code: 'OPIS', city: 'Islamabad' },
-  { code: 'OPLA', city: 'Lahore' },
-  { code: 'OPKC', city: 'Karachi' }
+  { code: 'OPIS', city: 'Islamabad', iata: 'ISB' },
+  { code: 'OPLA', city: 'Lahore', iata: 'LHE' },
+  { code: 'OPKC', city: 'Karachi', iata: 'KHI' }
 ];
 
 function formatTime(unixSeconds) {
@@ -10,20 +10,25 @@ function formatTime(unixSeconds) {
 }
 
 function normalizeFlight(flight, airportIcao, direction) {
-  const city = AIRPORTS.find(a => a.code === airportIcao)?.city || airportIcao;
+  const airport = AIRPORTS.find(a => a.code === airportIcao);
 
   return {
-    airport: city,
+    airport: airport?.city || airportIcao,
+    airportIata: airport?.iata || airportIcao,
     airportIcao,
     direction,
     callsign: (flight.callsign || '').trim(),
-    airline: '',
+    icao24: flight.icao24 || '',
     origin: flight.estDepartureAirport || '',
     destination: flight.estArrivalAirport || '',
     firstSeen: flight.firstSeen || null,
     lastSeen: flight.lastSeen || null,
     firstSeenText: formatTime(flight.firstSeen),
     lastSeenText: formatTime(flight.lastSeen),
+    scheduledLikeTime:
+      direction === 'Departure'
+        ? (flight.firstSeen ? new Date(flight.firstSeen * 1000).toISOString() : null)
+        : (flight.lastSeen ? new Date(flight.lastSeen * 1000).toISOString() : null),
     route:
       direction === 'Arrival'
         ? `${flight.estDepartureAirport || 'Unknown'} → ${airportIcao}`
@@ -142,40 +147,51 @@ async function fetchAirportFlights(token, airportIcao, begin, end) {
 }
 
 module.exports = async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 's-maxage=900, stale-while-revalidate=3600');
+
   try {
     const { start, end } = getPreviousUtcDayRange();
     const token = await getToken();
 
-    const allResults = await Promise.all(
+    const airportResults = await Promise.all(
       AIRPORTS.map(async airport => {
-        const { arrivals, departures } = await fetchAirportFlights(token, airport.code, start, end);
-        return [...arrivals, ...departures];
+        const data = await fetchAirportFlights(token, airport.code, start, end);
+        return {
+          airport,
+          arrivals: data.arrivals,
+          departures: data.departures
+        };
       })
     );
 
-    const flights = allResults.flat();
+    const summary = airportResults.map(r => ({
+      city: r.airport.city,
+      iata: r.airport.iata,
+      icao: r.airport.code,
+      arrivals: r.arrivals.length,
+      departures: r.departures.length,
+      total: r.arrivals.length + r.departures.length
+    }));
 
-    flights.sort((a, b) => {
-      const aTime = a.lastSeen || a.firstSeen || 0;
-      const bTime = b.lastSeen || b.firstSeen || 0;
-      return bTime - aTime;
-    });
+    const flights = airportResults
+      .flatMap(r => [...r.arrivals, ...r.departures])
+      .sort((a, b) => new Date(b.scheduledLikeTime || 0) - new Date(a.scheduledLikeTime || 0));
 
-    res.setHeader('Content-Type', 'application/json');
     res.status(200).json({
       success: true,
-      range: { begin: start, end },
+      generatedAt: new Date().toISOString(),
+      window: { begin: start, end },
+      summary,
       flights
     });
   } catch (error) {
     console.error('API /api/flights failed:', error);
 
-    res.setHeader('Content-Type', 'application/json');
     res.status(500).json({
       success: false,
       error: error?.message || 'Unknown error',
-      cause: error?.cause?.message || null,
-      stack: process.env.NODE_ENV !== 'production' ? error?.stack : undefined
+      cause: error?.cause?.message || null
     });
   }
 };
