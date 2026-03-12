@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pakistan Flight Dashboard</title>
+  <style>
+    :root {
+      --bg: #08111f;
+      --panel: #101b2d;
+      --panel-2: #15233a;
+      --text: #e7eef9;
+      --muted: #9fb0ca;
+      --border: #263754;
+      --good: #7dd3fc;
+      --accent: #60a5fa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, Arial, sans-serif;
+      background: linear-gradient(180deg, #07111e 0%, #0b1628 100%);
+      color: var(--text);
+    }
+    .wrap {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+    .title h1 {
+      margin: 0 0 8px;
+      font-size: 34px;
+    }
+    .title p, .small {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    button, select, input {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 14px;
+    }
+    button {
+      cursor: pointer;
+      background: linear-gradient(180deg, #1f4fa0 0%, #173d7d 100%);
+      border-color: #2854a5;
+      font-weight: 600;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 16px;
+    }
+    .card {
+      background: rgba(16, 27, 45, 0.95);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+    }
+    .kpi { grid-column: span 3; }
+    .airport-card { grid-column: span 4; }
+    .table-card { grid-column: span 12; overflow: hidden; }
+    .card h3, .card h2 {
+      margin-top: 0;
+      margin-bottom: 10px;
+    }
+    .metric {
+      font-size: 34px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .submetric {
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .airport-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .tag {
+      background: rgba(96, 165, 250, 0.15);
+      color: #bfdbfe;
+      border: 1px solid rgba(96, 165, 250, 0.35);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+    }
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .mini-stat {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .mini-stat .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .mini-stat .value {
+      font-size: 24px;
+      font-weight: 700;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+    thead th {
+      text-align: left;
+      color: #c8d7ef;
+      font-weight: 600;
+      padding: 14px 12px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(255,255,255,0.02);
+      position: sticky;
+      top: 0;
+    }
+    tbody td {
+      padding: 12px;
+      border-bottom: 1px solid rgba(38,55,84,0.7);
+      color: #e3ebf8;
+    }
+    tbody tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .table-wrap {
+      max-height: 520px;
+      overflow: auto;
+    }
+    .empty, .error {
+      padding: 22px;
+      border-radius: 14px;
+      background: rgba(255,255,255,0.03);
+      border: 1px dashed var(--border);
+      color: var(--muted);
+    }
+    .error { color: #fecaca; border-color: rgba(248,113,113,0.35); }
+    @media (max-width: 1100px) {
+      .kpi, .airport-card { grid-column: span 6; }
+    }
+    @media (max-width: 760px) {
+      .kpi, .airport-card, .table-card { grid-column: span 12; }
+      .title h1 { font-size: 28px; }
+      .mini-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hero">
+      <div class="title">
+        <h1>Pakistan Flight Dashboard</h1>
+        <p>Browser based tracker for Islamabad, Lahore and Karachi using OpenSky data.</p>
+        <p class="small" id="lastUpdated">Loading latest data...</p>
+      </div>
+      <div class="controls">
+        <select id="airportFilter">
+          <option value="ALL">All airports</option>
+          <option value="ISB">Islamabad</option>
+          <option value="LHE">Lahore</option>
+          <option value="KHI">Karachi</option>
+        </select>
+        <select id="directionFilter">
+          <option value="ALL">All directions</option>
+          <option value="Arrival">Arrivals</option>
+          <option value="Departure">Departures</option>
+        </select>
+        <input id="searchBox" type="text" placeholder="Search callsign or airport" />
+        <button id="refreshBtn">Refresh</button>
+      </div>
+    </div>
+
+    <div class="grid" id="dashboardGrid">
+      <div class="card kpi"><div class="submetric">Flights in feed</div><div class="metric" id="totalFlights">-</div><div class="submetric">Rolling OpenSky feed window</div></div>
+      <div class="card kpi"><div class="submetric">Arrivals</div><div class="metric" id="totalArrivals">-</div><div class="submetric">Across all three airports</div></div>
+      <div class="card kpi"><div class="submetric">Departures</div><div class="metric" id="totalDepartures">-</div><div class="submetric">Across all three airports</div></div>
+      <div class="card kpi"><div class="submetric">Active airports</div><div class="metric">3</div><div class="submetric">Islamabad, Lahore, Karachi</div></div>
+
+      <div class="card airport-card" id="airportISB"></div>
+      <div class="card airport-card" id="airportLHE"></div>
+      <div class="card airport-card" id="airportKHI"></div>
+
+      <div class="card table-card">
+        <h3>Flight activity</h3>
+        <div id="tableContent"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let allFlights = [];
+    let summary = [];
+
+    function formatDate(isoString) {
+      if (!isoString) return 'Unknown';
+      const d = new Date(isoString);
+      return d.toLocaleString('en-GB', {
+        year: 'numeric', month: 'short', day: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      });
+    }
+
+    function renderAirportCard(targetId, code) {
+      const target = document.getElementById(targetId);
+      const item = summary.find(s => s.iata === code) || { city: code, arrivals: 0, departures: 0, total: 0, icao: '' };
+      target.innerHTML = `
+        <div class="airport-top">
+          <div>
+            <h2>${item.city}</h2>
+            <div class="small">${item.iata} • ${item.icao}</div>
+          </div>
+          <div class="tag">${item.total} flights</div>
+        </div>
+        <div class="mini-grid">
+          <div class="mini-stat">
+            <div class="label">Arrivals</div>
+            <div class="value">${item.arrivals}</div>
+          </div>
+          <div class="mini-stat">
+            <div class="label">Departures</div>
+            <div class="value">${item.departures}</div>
+          </div>
+          <div class="mini-stat">
+            <div class="label">Total</div>
+            <div class="value">${item.total}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function getFilteredFlights() {
+      const airport = document.getElementById('airportFilter').value;
+      const direction = document.getElementById('directionFilter').value;
+      const search = document.getElementById('searchBox').value.trim().toLowerCase();
+
+      return allFlights.filter(f => {
+        const airportMatch = airport === 'ALL' || f.airportIata === airport;
+        const directionMatch = direction === 'ALL' || f.direction === direction;
+        const searchMatch = !search || [f.callsign, f.origin, f.destination, f.airportIata, f.city].join(' ').toLowerCase().includes(search);
+        return airportMatch && directionMatch && searchMatch;
+      });
+    }
+
+    function renderTable() {
+      const flights = getFilteredFlights();
+      const container = document.getElementById('tableContent');
+
+      if (!flights.length) {
+        container.innerHTML = '<div class="empty">No flights match the current filters.</div>';
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>City</th>
+                <th>Airport</th>
+                <th>Direction</th>
+                <th>Callsign</th>
+                <th>Route</th>
+                <th>First seen</th>
+                <th>Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${flights.map(f => `
+                <tr>
+                  <td>${f.city}</td>
+                  <td>${f.airportIata}</td>
+                  <td>${f.direction}</td>
+                  <td>${f.callsign || 'Unknown'}</td>
+                  <td>${f.route}</td>
+                  <td>${formatDate(f.firstSeen)}</td>
+                  <td>${formatDate(f.lastSeen)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    function render() {
+      const arrivals = allFlights.filter(f => f.direction === 'Arrival').length;
+      const departures = allFlights.filter(f => f.direction === 'Departure').length;
+      document.getElementById('totalFlights').textContent = allFlights.length;
+      document.getElementById('totalArrivals').textContent = arrivals;
+      document.getElementById('totalDepartures').textContent = departures;
+      renderAirportCard('airportISB', 'ISB');
+      renderAirportCard('airportLHE', 'LHE');
+      renderAirportCard('airportKHI', 'KHI');
+      renderTable();
+    }
+
+    async function loadData() {
+      const lastUpdated = document.getElementById('lastUpdated');
+      lastUpdated.textContent = 'Refreshing data...';
+
+      try {
+        const response = await fetch('/api/flights');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to load flight data');
+
+        allFlights = data.flights || [];
+        summary = data.summary || [];
+        lastUpdated.textContent = `Last updated ${formatDate(data.generatedAt)}. OpenSky window: ${data.windowHours} hours.`;
+        render();
+      } catch (error) {
+        document.getElementById('tableContent').innerHTML = `<div class="error">${error.message}</div>`;
+        lastUpdated.textContent = 'Unable to load flight data.';
+      }
+    }
+
+    document.getElementById('refreshBtn').addEventListener('click', loadData);
+    document.getElementById('airportFilter').addEventListener('change', renderTable);
+    document.getElementById('directionFilter').addEventListener('change', renderTable);
+    document.getElementById('searchBox').addEventListener('input', renderTable);
+
+    loadData();
+  </script>
+</body>
+</html>
